@@ -57,19 +57,38 @@ def remove_background_contiguous(image: np.ndarray) -> np.ndarray:
     rgba = cv2.merge([b, g, r, alpha_clean])
     return rgba
 
-def detectar_assets_contours(rgba_img: np.ndarray, area_min: int = 500) -> list:
+def detectar_assets_contours(rgba_img: np.ndarray, area_min: int = 500, aspect_ratio_min: float = 0.1, aspect_ratio_max: float = 10.0) -> list:
     alpha = rgba_img[:, :, 3]
     _, binary = cv2.threshold(alpha, 1, 255, cv2.THRESH_BINARY)
     contornos, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    return [c for c in contornos if cv2.contourArea(c) > area_min]
+    filtered = []
+    for c in contornos:
+        area = cv2.contourArea(c)
+        if area < area_min:
+            continue
+        x, y, w, h = cv2.boundingRect(c)
+        aspect_ratio = w / h if h > 0 else 0
+        if not (aspect_ratio_min <= aspect_ratio <= aspect_ratio_max):
+            continue
+        filtered.append(c)
+    return filtered
 
 def guardar_assets(rgba_img: np.ndarray, contornos: list, output_dir: str):
     os.makedirs(output_dir, exist_ok=True)
     metadata = []
     for i, cnt in enumerate(contornos):
         x, y, w, h = cv2.boundingRect(cnt)
-        asset = rgba_img[y:y+h, x:x+w]
-        pil_img = Image.fromarray(cv2.cvtColor(asset, cv2.COLOR_BGRA2RGBA))
+        # Crear máscara binaria exacta del contorno
+        mask = np.zeros((h, w), dtype=np.uint8)
+        cnt_shifted = cnt - [x, y]  # Ajustar contorno a ROI
+        cv2.drawContours(mask, [cnt_shifted], -1, 255, thickness=cv2.FILLED)
+        asset_roi = rgba_img[y:y+h, x:x+w]
+        # Aplicar máscara sobre los 4 canales
+        asset_masked = asset_roi.copy()
+        for c in range(3):  # BGR
+            asset_masked[:, :, c] = cv2.bitwise_and(asset_roi[:, :, c], asset_roi[:, :, c], mask=mask)
+        asset_masked[:, :, 3] = cv2.bitwise_and(asset_roi[:, :, 3], asset_roi[:, :, 3], mask=mask)
+        pil_img = Image.fromarray(cv2.cvtColor(asset_masked, cv2.COLOR_BGRA2RGBA))
         filename = f"asset_{i:03}.png"
         local_path = os.path.join(output_dir, filename)
         pil_img.save(local_path)
