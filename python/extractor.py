@@ -21,9 +21,9 @@ async def extract_endpoint(file: UploadFile = File(...)):
     try:
         validar_imagen(temp_path)
         imagen = cargar_imagen(temp_path)
-        imagen_transp = quitar_fondo_negro(imagen)
-        contornos = detectar_contornos(imagen_transp)
-        metadata = recortar_assets(imagen_transp, contornos, "output_assets")
+        imagen_transp = remove_background_contiguous(imagen)
+        contornos = detectar_assets_contours(imagen_transp)
+        metadata = guardar_assets(imagen_transp, contornos, "output_assets")
         return {"ok": True, "num_assets": len(metadata), "metadata": metadata}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -41,42 +41,38 @@ def validar_imagen(path):
 def cargar_imagen(path):
     return cv2.imread(path, cv2.IMREAD_UNCHANGED)
 
-def quitar_fondo_negro(imagen_cv):
-    gray = cv2.cvtColor(imagen_cv, cv2.COLOR_BGR2GRAY)
-    _, alpha = cv2.threshold(gray, 10, 255, cv2.THRESH_BINARY)
-    b, g, r = cv2.split(imagen_cv)
-    rgba = cv2.merge([b, g, r, alpha])
+def remove_background_contiguous(image: np.ndarray) -> np.ndarray:
+    h, w = image.shape[:2]
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    flood_mask = np.zeros((h + 2, w + 2), np.uint8)
+    flood_filled = image.copy()
+    for pt in [(0, 0), (w-1, 0), (0, h-1), (w-1, h-1)]:
+        cv2.floodFill(flood_filled, flood_mask, pt, (255, 255, 255), loDiff=(5,5,5), upDiff=(5,5,5))
+    flood_gray = cv2.cvtColor(flood_filled, cv2.COLOR_BGR2GRAY)
+    alpha = cv2.inRange(flood_gray, 0, 254)
+    alpha_f32 = alpha.astype(np.float32) / 255.0
+    alpha_f32[alpha_f32 < 0.1] = 0.0
+    alpha_clean = (alpha_f32 * 255).astype(np.uint8)
+    b, g, r = cv2.split(image)
+    rgba = cv2.merge([b, g, r, alpha_clean])
     return rgba
 
-def detectar_contornos(imagen_rgba):
-    gray = cv2.cvtColor(imagen_rgba, cv2.COLOR_BGRA2GRAY)
-    _, thresh = cv2.threshold(gray, 10, 255, cv2.THRESH_BINARY)
-    contornos, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    return contornos
+def detectar_assets_contours(rgba_img: np.ndarray, area_min: int = 500) -> list:
+    alpha = rgba_img[:, :, 3]
+    _, binary = cv2.threshold(alpha, 1, 255, cv2.THRESH_BINARY)
+    contornos, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    return [c for c in contornos if cv2.contourArea(c) > area_min]
 
-def recortar_assets(imagen_rgba, contornos, carpeta_salida):
-    os.makedirs(carpeta_salida, exist_ok=True)
+def guardar_assets(rgba_img: np.ndarray, contornos: list, output_dir: str):
+    os.makedirs(output_dir, exist_ok=True)
     metadata = []
-
-    for i, c in enumerate(contornos):
-        x, y, w, h = cv2.boundingRect(c)
-        if w < 20 or h < 20:
-            continue
-        asset = imagen_rgba[y:y+h, x:x+w]
-        filename = f"asset_{i:02d}.png"
-        path = os.path.join(carpeta_salida, filename)
-        cv2.imwrite(path, asset)
-
-        metadata.append({
-            "index": i,
-            "filename": filename,
-            "position": {"x": x, "y": y},
-            "dimensions": {"width": w, "height": h}
-        })
-
-    with open(os.path.join(carpeta_salida, "metadata.json"), "w") as f:
-        json.dump(metadata, f, indent=2)
-
+    for i, cnt in enumerate(contornos):
+        x, y, w, h = cv2.boundingRect(cnt)
+        asset = rgba_img[y:y+h, x:x+w]
+        pil_img = Image.fromarray(cv2.cvtColor(asset, cv2.COLOR_BGRA2RGBA))
+        filename = f"asset_{i:03}.png"
+        pil_img.save(os.path.join(output_dir, filename))
+        metadata.append({"filename": filename, "bbox": [int(x), int(y), int(w), int(h)]})
     return metadata
 
 def subir_a_supabase(local_path, remote_filename):

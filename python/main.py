@@ -3,8 +3,8 @@ from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from python.extractor import (
-    validar_imagen, cargar_imagen, quitar_fondo_negro,
-    detectar_contornos, recortar_assets
+    validar_imagen, cargar_imagen, remove_background_contiguous,
+    detectar_assets_contours, guardar_assets
 )
 import shutil
 
@@ -25,9 +25,9 @@ async def extract(file: UploadFile = File(...)):
     try:
         validar_imagen(temp_path)
         imagen = cargar_imagen(temp_path)
-        imagen_transp = quitar_fondo_negro(imagen)
-        contornos = detectar_contornos(imagen_transp)
-        metadata = recortar_assets(imagen_transp, contornos, "output_assets")
+        imagen_transp = remove_background_contiguous(imagen)
+        contornos = detectar_assets_contours(imagen_transp)
+        metadata = guardar_assets(imagen_transp, contornos, "output_assets")
         return JSONResponse({"ok": True, "num_assets": len(metadata), "metadata": metadata})
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
