@@ -71,28 +71,36 @@ def guardar_assets(rgba_img: np.ndarray, contornos: list, output_dir: str):
         asset = rgba_img[y:y+h, x:x+w]
         pil_img = Image.fromarray(cv2.cvtColor(asset, cv2.COLOR_BGRA2RGBA))
         filename = f"asset_{i:03}.png"
-        pil_img.save(os.path.join(output_dir, filename))
-        metadata.append({"filename": filename, "bbox": [int(x), int(y), int(w), int(h)]})
+        local_path = os.path.join(output_dir, filename)
+        pil_img.save(local_path)
+        # Subir a Supabase Storage
+        public_url = upload_to_supabase(local_path, filename)
+        metadata.append({"filename": filename, "bbox": [int(x), int(y), int(w), int(h)], "url": public_url})
     return metadata
 
-def subir_a_supabase(local_path, remote_filename):
+def upload_to_supabase(local_path, filename):
     """
-    Sube un archivo local a Supabase Storage y retorna la URL pública.
+    Sube un archivo PNG a Supabase Storage y retorna la URL pública.
     """
-    if not SUPABASE_URL or not SUPABASE_KEY:
-        raise RuntimeError("SUPABASE_URL y SUPABASE_KEY deben estar definidos en las variables de entorno.")
-    storage_url = f"{SUPABASE_URL}/storage/v1/object/{BUCKET_NAME}/{remote_filename}"
-    headers = {
-        "apikey": SUPABASE_KEY,
-        "Authorization": f"Bearer {SUPABASE_KEY}",
-        "Content-Type": "application/octet-stream"
-    }
+    import requests
+    bucket = "isolated-assets"
+    supabase_url = os.environ.get("SUPABASE_URL")
+    supabase_key = os.environ.get("SUPABASE_KEY")
+    assert supabase_url and supabase_key, "SUPABASE_URL y SUPABASE_KEY deben estar configurados"
+    storage_url = f"{supabase_url}/storage/v1/object/{bucket}/{filename}"
     with open(local_path, "rb") as f:
-        resp = requests.put(storage_url, headers=headers, data=f)
+        resp = requests.put(
+            storage_url,
+            headers={
+                "Authorization": f"Bearer {supabase_key}",
+                "Content-Type": "image/png"
+            },
+            data=f.read()
+        )
     if resp.status_code not in (200, 201):
         raise Exception(f"Error subiendo a Supabase: {resp.status_code} {resp.text}")
-    # URL pública (ajusta según configuración de tu bucket)
-    public_url = f"{SUPABASE_URL}/storage/v1/object/public/{BUCKET_NAME}/{remote_filename}"
+    # URL pública (ajusta si tu bucket no es público)
+    public_url = f"{supabase_url}/storage/v1/object/public/{bucket}/{filename}"
     return public_url
 
 if __name__ == "__main__":
