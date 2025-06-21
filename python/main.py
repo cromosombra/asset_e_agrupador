@@ -10,6 +10,9 @@ import shutil
 
 app = FastAPI()
 
+# Ensure output_assets directory exists at startup
+os.makedirs("output_assets", exist_ok=True)
+
 # Serve static files from the output_assets directory
 app.mount("/assets", StaticFiles(directory="output_assets"), name="assets")
 
