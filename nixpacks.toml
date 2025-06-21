@@ -1,0 +1,9 @@
+[build]
+builder = "nixpacks"
+
+[phases.setup]
+nixPkgs = ["libGL"]
+
+[variables]
+BP_LANGUAGE = "python"
+BP_PYTHON_VERSION = "3.11"
