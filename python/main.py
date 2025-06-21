@@ -1,7 +1,7 @@
 import os
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.responses import JSONResponse
-from src.python.extractor import (
+from python.extractor import (
     validar_imagen, cargar_imagen, quitar_fondo_negro,
     detectar_contornos, recortar_assets
 )
