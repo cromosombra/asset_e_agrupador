@@ -73,6 +73,25 @@ def detectar_assets_contours(rgba_img: np.ndarray, area_min: int = 500, aspect_r
         filtered.append(c)
     return filtered
 
+def detectar_assets_grouped_contours(rgba_img: np.ndarray, area_min: int = 500, aspect_ratio_min: float = 0.1, aspect_ratio_max: float = 10.0, kernel_size: int = 7) -> list:
+    """
+    Detecta contornos agrupados usando dilatación sobre la máscara alfa.
+    """
+    alpha = rgba_img[:, :, 3]
+    _, binary = cv2.threshold(alpha, 1, 255, cv2.THRESH_BINARY)
+    contornos = find_grouped_contours(binary, kernel_size=kernel_size)
+    filtered = []
+    for c in contornos:
+        area = cv2.contourArea(c)
+        if area < area_min:
+            continue
+        x, y, w, h = cv2.boundingRect(c)
+        aspect_ratio = w / h if h > 0 else 0
+        if not (aspect_ratio_min <= aspect_ratio <= aspect_ratio_max):
+            continue
+        filtered.append(c)
+    return filtered
+
 def guardar_assets(rgba_img: np.ndarray, contornos: list, output_dir: str):
     os.makedirs(output_dir, exist_ok=True)
     metadata = []
@@ -121,6 +140,23 @@ def upload_to_supabase(local_path, filename):
     # URL pública (ajusta si tu bucket no es público)
     public_url = f"{supabase_url}/storage/v1/object/public/{bucket}/{filename}"
     return public_url
+
+def find_grouped_contours(
+    mask: np.ndarray,
+    kernel_size: int = 7
+) -> List[np.ndarray]:
+    """
+    Aplica dilatación a la máscara binaria para agrupar fragmentos cercanos y luego detecta contornos.
+    Args:
+        mask (np.ndarray): Máscara binaria (0 y 255).
+        kernel_size (int): Tamaño del kernel de dilatación.
+    Returns:
+        List[np.ndarray]: Lista de contornos agrupados.
+    """
+    kernel = np.ones((kernel_size, kernel_size), np.uint8)
+    dilated = cv2.dilate(mask, kernel, iterations=1)
+    contornos, _ = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    return contornos
 
 if __name__ == "__main__":
     import uvicorn
