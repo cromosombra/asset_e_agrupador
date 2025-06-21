@@ -1,6 +1,7 @@
 import os
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from python.extractor import (
     validar_imagen, cargar_imagen, quitar_fondo_negro,
     detectar_contornos, recortar_assets
@@ -8,6 +9,9 @@ from python.extractor import (
 import shutil
 
 app = FastAPI()
+
+# Serve static files from the output_assets directory
+app.mount("/assets", StaticFiles(directory="output_assets"), name="assets")
 
 @app.post("/extract")
 async def extract(file: UploadFile = File(...)):
