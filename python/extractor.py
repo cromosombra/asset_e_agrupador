@@ -4,9 +4,11 @@ import numpy as np
 import os
 import json
 import requests
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Form
 import shutil
 from typing import List
+import csv
+import re
 
 BUCKET_NAME = "isolated-assets"
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
@@ -15,7 +17,8 @@ SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 app = FastAPI()
 
 @app.post("/extract")
-async def extract_endpoint(file: UploadFile = File(...)):
+async def extract_endpoint(file: UploadFile = File(...), style: str = Form(...)):
+    validar_style(style)
     temp_path = f"temp_{file.filename}"
     with open(temp_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
@@ -24,7 +27,7 @@ async def extract_endpoint(file: UploadFile = File(...)):
         imagen = cargar_imagen(temp_path)
         imagen_transp = remove_background_contiguous(imagen)
         contornos = detectar_assets_contours(imagen_transp)
-        metadata = guardar_assets(imagen_transp, contornos, "output_assets")
+        metadata = guardar_assets(imagen_transp, contornos, "output_assets", style)
         return {"ok": True, "num_assets": len(metadata), "metadata": metadata}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -38,6 +41,10 @@ def root():
 def validar_imagen(path):
     assert os.path.exists(path), f"La ruta no existe: {path}"
     assert path.endswith((".png", ".jpg", ".jpeg")), "Formato no soportado"
+
+def validar_style(style: str):
+    if not re.match(r"^[A-Za-z0-9_]+$", style):
+        raise HTTPException(status_code=400, detail="Style invalido")
 
 def cargar_imagen(path):
     return cv2.imread(path, cv2.IMREAD_UNCHANGED)
@@ -93,28 +100,57 @@ def detectar_assets_grouped_contours(rgba_img: np.ndarray, area_min: int = 500, 
         filtered.append(c)
     return filtered
 
-def guardar_assets(rgba_img: np.ndarray, contornos: list, output_dir: str):
+def classify_asset_type(width: int, height: int) -> str:
+    ratio = width / height if height else 0
+    if ratio > 2.5 or ratio < 0.4:
+        return "line"
+    return "square"
+
+def guardar_assets(rgba_img: np.ndarray, contornos: list, output_dir: str, style: str):
     os.makedirs(output_dir, exist_ok=True)
     metadata = []
     for i, cnt in enumerate(contornos):
         x, y, w, h = cv2.boundingRect(cnt)
-        # Crear máscara binaria exacta del contorno
         mask = np.zeros((h, w), dtype=np.uint8)
-        cnt_shifted = cnt - [x, y]  # Ajustar contorno a ROI
+        cnt_shifted = cnt - [x, y]
         cv2.drawContours(mask, [cnt_shifted], -1, 255, thickness=cv2.FILLED)
         asset_roi = rgba_img[y:y+h, x:x+w]
-        # Aplicar máscara sobre los 4 canales
         asset_masked = asset_roi.copy()
-        for c in range(3):  # BGR
+        for c in range(3):
             asset_masked[:, :, c] = cv2.bitwise_and(asset_roi[:, :, c], asset_roi[:, :, c], mask=mask)
         asset_masked[:, :, 3] = cv2.bitwise_and(asset_roi[:, :, 3], asset_roi[:, :, 3], mask=mask)
+
         pil_img = Image.fromarray(cv2.cvtColor(asset_masked, cv2.COLOR_BGRA2RGBA))
-        filename = f"asset_{i:03}.png"
+
+        asset_type = classify_asset_type(w, h)
+        if asset_type == "line" and h > w:
+            pil_img = pil_img.rotate(90, expand=True)
+            w, h = pil_img.size
+
+        filename = f"{style}_{asset_type}_{i:04d}.png"
         local_path = os.path.join(output_dir, filename)
         pil_img.save(local_path)
-        # Subir a Supabase Storage
         public_url = upload_to_supabase(local_path, filename)
-        metadata.append({"filename": filename, "bbox": [int(x), int(y), int(w), int(h)], "url": public_url})
+
+        size_kb = os.path.getsize(local_path) / 1024
+        metadata.append({
+            "filename": filename,
+            "width": w,
+            "height": h,
+            "size_kb": round(size_kb, 2),
+            "style": style,
+            "type": asset_type,
+            "url": public_url,
+        })
+
+    csv_path = os.path.join(output_dir, "assets_metadata.csv")
+    with open(csv_path, "w", newline="") as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=["filename", "width", "height", "size_kb", "style", "type"])
+        writer.writeheader()
+        for data in metadata:
+            writer.writerow({k: data[k] for k in ["filename", "width", "height", "size_kb", "style", "type"]})
+
+    upload_to_supabase(csv_path, "assets_metadata.csv")
     return metadata
 
 def upload_to_supabase(local_path, filename):
@@ -127,14 +163,15 @@ def upload_to_supabase(local_path, filename):
     supabase_key = os.environ.get("SUPABASE_KEY")
     assert supabase_url and supabase_key, "SUPABASE_URL y SUPABASE_KEY deben estar configurados"
     storage_url = f"{supabase_url}/storage/v1/object/{bucket}/{filename}"
+    content_type = "text/csv" if filename.endswith(".csv") else "image/png"
     with open(local_path, "rb") as f:
         resp = requests.put(
             storage_url,
             headers={
                 "Authorization": f"Bearer {supabase_key}",
-                "Content-Type": "image/png"
+                "Content-Type": content_type,
             },
-            data=f.read()
+            data=f.read(),
         )
     if resp.status_code not in (200, 201):
         raise Exception(f"Error subiendo a Supabase: {resp.status_code} {resp.text}")
