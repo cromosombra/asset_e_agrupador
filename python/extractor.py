@@ -144,7 +144,7 @@ def upload_to_supabase(local_path, filename):
 
 def find_grouped_contours(
     mask: np.ndarray,
-    kernel_size: int = 15  # Aumentado de 7 a 15
+    kernel_size: int = 35  # Aumentado de 15 a 35
 ) -> List[np.ndarray]:
     """
     Aplica dilatación a la máscara binaria para agrupar fragmentos cercanos y luego detecta contornos.
@@ -155,7 +155,7 @@ def find_grouped_contours(
         List[np.ndarray]: Lista de contornos agrupados.
     """
     kernel = np.ones((kernel_size, kernel_size), np.uint8)
-    dilated = cv2.dilate(mask, kernel, iterations=2)  # Iteraciones aumentadas a 2
+    dilated = cv2.dilate(mask, kernel, iterations=4)  # Iteraciones aumentadas a 4
     contornos, _ = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     return contornos
 
