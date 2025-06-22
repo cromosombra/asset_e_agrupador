@@ -6,6 +6,7 @@ import json
 import requests
 from fastapi import FastAPI, UploadFile, File, HTTPException
 import shutil
+from typing import List
 
 BUCKET_NAME = "isolated-assets"
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
