@@ -7,7 +7,6 @@ import requests
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form
 import shutil
 from typing import List
-import csv
 import re
 
 BUCKET_NAME = "isolated-assets"
@@ -143,14 +142,11 @@ def guardar_assets(rgba_img: np.ndarray, contornos: list, output_dir: str, style
             "url": public_url,
         })
 
-    csv_path = os.path.join(output_dir, "assets_metadata.csv")
-    with open(csv_path, "w", newline="") as csvfile:
-        writer = csv.DictWriter(csvfile, fieldnames=["filename", "width", "height", "size_kb", "style", "type"])
-        writer.writeheader()
-        for data in metadata:
-            writer.writerow({k: data[k] for k in ["filename", "width", "height", "size_kb", "style", "type"]})
+    json_path = os.path.join(output_dir, "assets_metadata.json")
+    with open(json_path, "w", encoding="utf-8") as jsonfile:
+        json.dump(metadata, jsonfile, ensure_ascii=False, indent=2)
 
-    upload_to_supabase(csv_path, "assets_metadata.csv")
+    upload_to_supabase(json_path, "assets_metadata.json")
     return metadata
 
 def upload_to_supabase(local_path, filename):
@@ -163,7 +159,12 @@ def upload_to_supabase(local_path, filename):
     supabase_key = os.environ.get("SUPABASE_KEY")
     assert supabase_url and supabase_key, "SUPABASE_URL y SUPABASE_KEY deben estar configurados"
     storage_url = f"{supabase_url}/storage/v1/object/{bucket}/{filename}"
-    content_type = "text/csv" if filename.endswith(".csv") else "image/png"
+    if filename.endswith(".json"):
+        content_type = "application/json"
+    elif filename.endswith(".csv"):
+        content_type = "text/csv"
+    else:
+        content_type = "image/png"
     with open(local_path, "rb") as f:
         resp = requests.put(
             storage_url,
