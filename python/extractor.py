@@ -147,6 +147,23 @@ def guardar_assets(rgba_img: np.ndarray, contornos: list, output_dir: str, style
         json.dump(metadata, jsonfile, ensure_ascii=False, indent=2)
 
     upload_to_supabase(json_path, "assets_metadata.json")
+
+    # Enviar metadata al servicio Archiver
+    try:
+        with open(json_path, "r") as f:
+            json_data = json.load(f)
+        resp = requests.post(
+            "https://archiver-vercel.vercel.app/api/archiver",
+            json=json_data,
+            timeout=10,
+        )
+        if resp.ok:
+            print("Archiver request successful")
+        else:
+            print(f"Archiver request failed: {resp.status_code} {resp.text}")
+    except Exception as e:
+        print(f"Error sending to Archiver: {e}")
+
     return metadata
 
 def upload_to_supabase(local_path, filename):
